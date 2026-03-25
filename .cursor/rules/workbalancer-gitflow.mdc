@@ -16,6 +16,10 @@ alwaysApply: true
 3. Merge в `develop` через PR (или локально после ревью).
 4. Релиз: merge `develop` → `main`, тег `vX.Y.Z`.
 
+## «Зафиксируй» — выкладка на GitHub
+
+В контексте Cursor **«зафиксируй»** включает: тщательные тесты (см. `workbalancer-testing.mdc`), при необходимости **curl** / реальная БД, затем **push** веток **`develop`** и **`main`** на `origin` (например `git push origin develop && git push origin main` после merge).
+
 ## Cursor / правила
 
 - Правила проекта: `.cursorrules` и `.cursor/rules/*.mdc` — в репозитории; при смене архитектуры или тестов обновлять соответствующие `.mdc`.

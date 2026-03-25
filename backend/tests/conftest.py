@@ -42,5 +42,9 @@ def postgres_async_url() -> str:
         pytest.skip("testcontainers not installed")
 
     with PostgresContainer("postgres:16-alpine") as postgres:
-        url = postgres.get_connection_url().replace("postgresql://", "postgresql+asyncpg://", 1)
+        raw = postgres.get_connection_url()
+        if "postgresql+psycopg2://" in raw:
+            url = raw.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+        else:
+            url = raw.replace("postgresql://", "postgresql+asyncpg://", 1)
         yield url

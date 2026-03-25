@@ -62,6 +62,20 @@ postgresql/
 - Команды и маркеры: см. `backend/pyproject.toml` (`[tool.pytest.ini_options]`), `SKIP_INTEGRATION=1` отключает тесты с Docker/Postgres.
 - Перед коммитом: `cd backend && SKIP_INTEGRATION=1 python -m pytest tests/ -q --cov=workbalancer`.
 
+## «Зафиксируй» — обязательный смысл для агента
+
+Если в задаче сказано **«зафиксируй»** (или «зафиксировать изменения»), это означает не только коммит в git, а **полный цикл проверки и выкладки**:
+
+1. **Автотесты** — прогон `pytest` (unit; по возможности интеграционные с реальной БД/Redis, см. ниже).
+2. **Ручная / полуручная проверка** — хотя бы одно из:
+   - HTTP: **`curl`** к работающему backend (например `GET /health`, `GET /health/ready` при поднятом Postgres+Redis), или
+   - короткий **скрипт/вызов** с **реальным** `DATABASE_URL` / `REDIS_URL` (локально или `docker compose`), если менялись репозитории или миграции.
+3. **Gitflow и GitHub** — изменения в ветке **`develop`** (или `feature/*` → merge в `develop`), затем **merge `develop` → `main`**, **`git push origin develop`** и **`git push origin main`**.
+
+Без успешных тестов и явной проверки API/БД (где применимо) считать «зафиксировать» **нельзя** — только после этого коммит и пуш.
+
+Подробнее по сценариям curl и окружению: `.cursor/rules/workbalancer-testing.mdc` и `.cursor/rules/workbalancer-gitflow.mdc`.
+
 ## Gitflow
 
 - Ветки: **main** (стабильная), **develop** (интеграция), **feature/*** для задач.

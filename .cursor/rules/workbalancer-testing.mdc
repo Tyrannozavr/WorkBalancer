@@ -21,6 +21,21 @@ SKIP_INTEGRATION=1 .venv/bin/python -m pytest tests/ -q --cov=workbalancer --cov
 .venv/bin/python -m pytest tests/ -q -m integration
 ```
 
+## Ручная проверка (когда просят «зафиксируй»)
+
+При фиксации изменений в репозитории дополнительно к pytest:
+
+1. Поднять стек (пример): `docker compose up -d postgres redis` (и при необходимости backend), задать в `.env` `DATABASE_URL`, `REDIS_URL`.
+2. Миграции: `cd backend && PYTHONPATH=src .venv/bin/alembic upgrade head`.
+3. Запустить API: `PYTHONPATH=src uvicorn workbalancer.main:app --host 0.0.0.0 --port 8000` (или через compose).
+4. **curl** (минимум):
+   - `curl -sS http://localhost:8080/health` (если nginx на 8080) или `http://localhost:8000/health`
+   - `curl -sS -o /dev/null -w "%{http_code}" http://localhost:8000/health/ready` — ожидается `200` при живых Postgres и Redis.
+
+Для вебхуков Cursor — проверка подписи HMAC с реальным `CURSOR_WEBHOOK_SECRET` и сырым телом (см. документацию Cursor).
+
+Фикстура `postgres_async_url` в `tests/conftest.py` приводит URL testcontainers к **`postgresql+asyncpg://`** (в т.ч. если драйвер в строке был `psycopg2`), иначе SQLAlchemy async не поднимется.
+
 ## Правила
 
 - Новая логика в `application`/`domain` — сначала сценарии в unit-тестах с моками портов.
