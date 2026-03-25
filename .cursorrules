@@ -57,3 +57,7 @@ postgresql/
 
 - Ветки: **main** (стабильная), **develop** (интеграция), **feature/*** для задач.
 - Коммиты: conventional (`feat:`, `fix:`, `test:`, `chore:`). Подробнее: `.cursor/rules/workbalancer-gitflow.mdc`.
+
+## Бэклог
+
+- Оставшиеся задачи: корневой файл [TODO.md](TODO.md).
