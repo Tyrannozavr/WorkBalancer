@@ -26,10 +26,25 @@ alwaysApply: true
 | **infrastructure** | Реализации портов: PostgreSQL, Redis, внешние API, маппинг persistence ↔ domain. |
 | **presentation** | Все **входные адаптеры** для пользователей: не дублировать бизнес-логику — только маппинг запрос/ответ и вызов application. |
 
+## Асинхронность (обязательно)
+
+Весь I/O и оркестрация на backend — **асинхронные**: `async def`, не блокировать event loop.
+
+- **HTTP (FastAPI)** — асинхронные эндпоинты и зависимости; внешние вызовы через **httpx.AsyncClient** (или эквивалент).
+- **БД** — **SQLAlchemy 2 async** + **asyncpg**; сессии и репозитории — `async`.
+- **Redis** — **`redis.asyncio`** (не синхронный клиент в async-коде).
+- **Тяжёлый CPU или редкий синхронный SDK** — вынос в `asyncio.to_thread()` или отдельный worker, не смешивать с долгими блокировками в хендлерах.
+
+Домен может оставаться синхронным там, где чистая логика без I/O; всё, что трогает сеть/БД/кэш/файлы — только async-слой.
+
+## Telegram: только aiogram
+
+Клиент бота — **aiogram 3.x** (`Bot`, `Dispatcher`, `Router`, filters, handlers). Другие библиотеки для Telegram-бота в этом проекте **не вводить** без явного решения (единый стек, предсказуемые паттерны).
+
 ## Presentation: веб и Telegram в одном слое
 
 - **`presentation/web`** — HTTP API (REST/JSON, при необходимости WebSocket), middleware, OpenAPI; вызывает только application-сценарии.
-- **`presentation/telegram`** — long polling / webhook бот, хендлеры команд и callback; тонкий слой: парсинг апдейтов → вызов **тех же** use cases, что и веб.
+- **`presentation/telegram`** — long polling / webhook бот на **aiogram**, хендлеры команд и callback; тонкий слой: парсинг апдейтов → вызов **тех же** use cases, что и веб.
 
 Общие правила:
 

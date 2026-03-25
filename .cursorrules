@@ -19,10 +19,19 @@
 
 Зависимости: presentation/infrastructure → application → domain.
 
+## Асинхронность
+
+- Весь I/O на backend — **асинхронный**: `async def`, FastAPI, SQLAlchemy async + asyncpg, `redis.asyncio`, **httpx** для исходящих HTTP.
+- Не блокировать event loop синхронными сетевыми/БД-вызовами в async-коде; тяжёлый CPU/редкий sync-SDK — через `asyncio.to_thread()` или воркер.
+
+## Telegram
+
+- Клиент бота — **aiogram 3.x**; другие Telegram SDK для бота в проект не подключать без явного обоснования.
+
 ## Presentation: веб и Telegram
 
 - **presentation/web** — HTTP API (REST, при необходимости WebSocket), middleware, OpenAPI.
-- **presentation/telegram** — бот (polling/webhook), хендлеры команд/callback.
+- **presentation/telegram** — бот на **aiogram** (polling/webhook), хендлеры команд/callback.
 
 Оба адаптера вызывают **одни и те же** use cases из `application`. Дублировать сценарии под канал нельзя — только разные адаптеры.
 
