@@ -1,0 +1,21 @@
+---
+description: Gitflow и коммиты для WorkBalancer
+alwaysApply: true
+---
+
+# Gitflow (соглашение)
+
+- **main** — стабильная ветка; релизы и теги.
+- **develop** — интеграция фич; от неё ответвляются feature-ветки.
+- **feature/** — имена вида `feature/краткое-описание` (например `feature/telegram-callbacks`).
+
+## Рабочий цикл
+
+1. От `develop`: `git checkout -b feature/...`
+2. Коммиты атомарные, сообщения на английском (conventional): `feat:`, `fix:`, `test:`, `chore:`.
+3. Merge в `develop` через PR (или локально после ревью).
+4. Релиз: merge `develop` → `main`, тег `vX.Y.Z`.
+
+## Cursor / правила
+
+- Правила проекта: `.cursorrules` и `.cursor/rules/*.mdc` — в репозитории; при смене архитектуры или тестов обновлять соответствующие `.mdc`.

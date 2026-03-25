@@ -1,0 +1,59 @@
+# WorkBalancer — архитектура проекта
+
+Этот документ дублирует смысл правила `.cursor/rules/workbalancer-architecture.mdc` для удобства. При расхождении приоритет у `.mdc`.
+
+## Стек
+
+- **nginx** — reverse proxy, TLS, отдача статики фронта, проксирование API на backend.
+- **frontend** — отдельное приложение (SPA/SSR); только UI и вызовы API; доменная логика не в frontend.
+- **backend** — DDD: domain, application, infrastructure, presentation.
+- **redis** — кэш, сессии, очереди/locks по необходимости.
+- **postgresql** — основное хранилище доменных данных.
+
+## Backend (DDD)
+
+- **domain** — сущности, VO, инварианты, доменные события/сервисы; без фреймворков и БД.
+- **application** — use cases, порты (интерфейсы), оркестрация; единая точка сценариев.
+- **infrastructure** — PostgreSQL, Redis, адаптеры к внешним API; реализация портов.
+- **presentation** — все входы в систему: не содержит бизнес-логики домена, только маппинг и вызов application.
+
+Зависимости: presentation/infrastructure → application → domain.
+
+## Presentation: веб и Telegram
+
+- **presentation/web** — HTTP API (REST, при необходимости WebSocket), middleware, OpenAPI.
+- **presentation/telegram** — бот (polling/webhook), хендлеры команд/callback.
+
+Оба адаптера вызывают **одни и те же** use cases из `application`. Дублировать сценарии под канал нельзя — только разные адаптеры.
+
+## Каталоги (ориентир)
+
+```
+nginx/
+frontend/
+backend/src/<package>/
+  domain/
+  application/
+  infrastructure/
+  presentation/
+    web/
+    telegram/
+redis/
+postgresql/
+```
+
+## Запреты
+
+- Не обращаться к БД/Redis из presentation напрямую.
+- Не переносить доменные правила в nginx или frontend.
+
+## Тестирование
+
+- Покрытие изменений тестами: **unit** (моки портов, `respx`, моки Redis) и при необходимости **integration** (FastAPI `TestClient`, опционально Postgres через testcontainers).
+- Команды и маркеры: см. `backend/pyproject.toml` (`[tool.pytest.ini_options]`), `SKIP_INTEGRATION=1` отключает тесты с Docker/Postgres.
+- Перед коммитом: `cd backend && SKIP_INTEGRATION=1 python -m pytest tests/ -q --cov=workbalancer`.
+
+## Gitflow
+
+- Ветки: **main** (стабильная), **develop** (интеграция), **feature/*** для задач.
+- Коммиты: conventional (`feat:`, `fix:`, `test:`, `chore:`). Подробнее: `.cursor/rules/workbalancer-gitflow.mdc`.

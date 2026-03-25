@@ -1,0 +1,63 @@
+---
+description: Архитектура WorkBalancer — стек, DDD, presentation (web + Telegram)
+alwaysApply: true
+---
+
+# WorkBalancer — структура и границы
+
+## Инфраструктура (топ-уровень)
+
+- **nginx** — reverse proxy, TLS, статика фронта, проксирование API к backend.
+- **frontend** — отдельное SPA/SSR-приложение; общается с backend по HTTP/WebSocket; не содержит бизнес-логики домена.
+- **backend** — единая кодовая база по **DDD**; все сценарии (веб и Telegram) проходят через одни и те же application/use-case слои.
+- **redis** — кэш, сессии, очереди/блокировки по необходимости; не источник истины для доменных данных.
+- **postgresql** — персистентность агрегатов и транзакционные границы.
+
+Оркестрация (docker-compose и т.п.) — в корне или в `infra/`, без смешивания с кодом домена.
+
+## Backend (DDD): слои и зависимости
+
+Зависимости только **внутрь**: `presentation` и `infrastructure` → `application` → `domain`. Домен не импортирует фреймворки, БД, HTTP, Telegram SDK.
+
+| Слой | Назначение |
+|------|------------|
+| **domain** | Сущности, value objects, доменные события, инварианты, доменные сервисы (чистая логика). |
+| **application** | Use cases / application services, порты (интерфейсы) к репозиториям и внешним системам, DTO между слоями, оркестрация транзакций. |
+| **infrastructure** | Реализации портов: PostgreSQL, Redis, внешние API, маппинг persistence ↔ domain. |
+| **presentation** | Все **входные адаптеры** для пользователей: не дублировать бизнес-логику — только маппинг запрос/ответ и вызов application. |
+
+## Presentation: веб и Telegram в одном слое
+
+- **`presentation/web`** — HTTP API (REST/JSON, при необходимости WebSocket), middleware, OpenAPI; вызывает только application-сценарии.
+- **`presentation/telegram`** — long polling / webhook бот, хендлеры команд и callback; тонкий слой: парсинг апдейтов → вызов **тех же** use cases, что и веб.
+
+Общие правила:
+
+- Один сценарий = один use case в `application`; веб и Telegram — два адаптера к нему.
+- Не класть доменную логику в хендлеры HTTP или Telegram.
+- Идентификация пользователя и контекст (tenant, роли) формируются в presentation и передаются в application как параметры/контекст, без утечки деталей Telegram/HTTP в domain.
+
+## Рекомендуемая раскладка каталогов (ориентир)
+
+```text
+nginx/
+frontend/
+backend/
+  src/<package>/
+    domain/
+    application/
+    infrastructure/
+    presentation/
+      web/
+      telegram/
+redis/          # при необходимости конфиги/скрипты
+postgresql/     # миграции или ссылки на инструмент миграций
+```
+
+Имена пакета и языка (Python/Node/Go) не фиксируются — соблюдать DDD-границы важнее конкретных имён папок.
+
+## Что не делать
+
+- Не вызывать PostgreSQL/Redis из `presentation` напрямую.
+- Не дублировать use cases отдельно для Telegram и для веба — только разные адаптеры.
+- Не хранить бизнес-правила в nginx или frontend.

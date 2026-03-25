@@ -1,0 +1,28 @@
+---
+description: Тестирование WorkBalancer — слои, pytest, маркеры, покрытие
+globs: backend/tests/**/*.py
+alwaysApply: false
+---
+
+# Тестирование
+
+## Пирамида
+
+- **Unit** — `backend/tests/unit/`: без Docker; чистые функции, домен, `Orchestrator` с моками портов (`AsyncMock`), `respx` для HTTP Cursor API, моки `redis.asyncio.from_url` для `RedisService`.
+- **integration** — `backend/tests/integration/`: `TestClient` (FastAPI), при `POST /webhooks/cursor` — `dependency_overrides` для `get_orchestrator`; маркер `@pytest.mark.integration` + **testcontainers Postgres** для репозиториев.
+
+## Запуск
+
+```bash
+cd backend && python -m venv .venv && .venv/bin/pip install -e '.[dev]'
+# только unit + быстрые integration без Docker:
+SKIP_INTEGRATION=1 .venv/bin/python -m pytest tests/ -q --cov=workbalancer --cov-report=term-missing
+# с интеграцией Postgres (нужен Docker):
+.venv/bin/python -m pytest tests/ -q -m integration
+```
+
+## Правила
+
+- Новая логика в `application`/`domain` — сначала сценарии в unit-тестах с моками портов.
+- HTTP-клиенты и внешние API — через `respx`, не ходить в реальную сеть в CI.
+- Интеграционные тесты с БД не должны блокировать локальный прогон: при `SKIP_INTEGRATION=1` фикстура `postgres_async_url` пропускает модуль.
