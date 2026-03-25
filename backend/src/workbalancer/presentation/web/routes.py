@@ -6,8 +6,10 @@ from typing import Any
 
 from aiogram import Bot
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy import text
 
 from workbalancer.application.services import Orchestrator
+from workbalancer.infrastructure.db import engine
 from workbalancer.domain.models import AgentWebhookPayload
 from workbalancer.infrastructure.webhook_verify import verify_cursor_webhook_signature
 from workbalancer.presentation.notify import send_terminal_notification
@@ -37,6 +39,22 @@ def _parse_payload(data: dict[str, Any]) -> AgentWebhookPayload:
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/health/ready")
+async def health_ready(request: Request) -> dict[str, str]:
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception:
+        raise HTTPException(status_code=503, detail="database_unavailable") from None
+    redis = getattr(request.app.state, "redis_service", None)
+    if redis is not None:
+        try:
+            await redis.ping()
+        except Exception:
+            raise HTTPException(status_code=503, detail="redis_unavailable") from None
+    return {"status": "ready"}
 
 
 @router.post("/webhooks/cursor")

@@ -60,3 +60,16 @@ class RedisService(RedisPort):
         key = f"wb:notify:{cursor_agent_id}"
         ok = await r.set(key, "1", nx=True, ex=86400 * 7)
         return bool(ok)
+
+    async def set_last_agent_for_chat(self, chat_id: int, cursor_agent_id: str) -> None:
+        r = await self._conn()
+        await r.set(f"wb:last_agent:{chat_id}", cursor_agent_id, ex=86400 * 30)
+
+    async def get_last_agent_for_chat(self, chat_id: int) -> str | None:
+        r = await self._conn()
+        v = await r.get(f"wb:last_agent:{chat_id}")
+        return str(v) if v else None
+
+    async def ping(self) -> None:
+        r = await self._conn()
+        await r.ping()

@@ -198,6 +198,39 @@ class SqlAgentJobRepository(AgentJobRepositoryPort):
             )
         )
 
+    async def list_recent_for_chat(self, chat_id: int, limit: int) -> list[AgentJob]:
+        res = await self._s.execute(
+            select(AgentJobORM)
+            .where(AgentJobORM.telegram_chat_id == chat_id)
+            .order_by(AgentJobORM.id.desc())
+            .limit(limit)
+        )
+        return [_job_from_orm(r) for r in res.scalars().all()]
+
+    async def list_active_for_chat(self, chat_id: int) -> list[AgentJob]:
+        res = await self._s.execute(
+            select(AgentJobORM)
+            .where(
+                AgentJobORM.telegram_chat_id == chat_id,
+                AgentJobORM.status.in_(
+                    [
+                        AgentJobStatus.PENDING_LAUNCH.value,
+                        AgentJobStatus.CREATING.value,
+                        AgentJobStatus.RUNNING.value,
+                    ]
+                ),
+            )
+            .order_by(AgentJobORM.id.desc())
+        )
+        return [_job_from_orm(r) for r in res.scalars().all()]
+
+    async def update_status_by_cursor_id(self, cursor_agent_id: str, status: str) -> None:
+        await self._s.execute(
+            update(AgentJobORM)
+            .where(AgentJobORM.cursor_agent_id == cursor_agent_id)
+            .values(status=status, updated_at=datetime.now(UTC))
+        )
+
 
 class SqlAuditRepository(AuditRepositoryPort):
     def __init__(self, session: AsyncSession) -> None:

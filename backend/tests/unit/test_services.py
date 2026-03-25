@@ -111,6 +111,27 @@ async def test_launch_task_parallel_limit(
 
 
 @pytest.mark.asyncio
+async def test_launch_task_sets_last_agent(orchestrator: Orchestrator, test_env: None) -> None:
+    orchestrator.projects.get_by_id = AsyncMock(
+        return_value=Project(id=1, name="n", repository_url="https://github.com/o/r", ref="main")
+    )
+    orchestrator.jobs.count_active_for_user = AsyncMock(return_value=0)
+    orchestrator.jobs.create_pending = AsyncMock(
+        return_value=_job(id=5, status=AgentJobStatus.PENDING_LAUNCH, cursor_agent_id=None)
+    )
+    orchestrator.jobs.update_from_launch = AsyncMock()
+    orchestrator.jobs.get_by_id = AsyncMock(
+        return_value=_job(id=5, cursor_agent_id="bc_new", status=AgentJobStatus.CREATING, agent_url="https://a")
+    )
+    orchestrator.redis.set_last_agent_for_chat = AsyncMock()
+    orchestrator.cursor.launch_agent = AsyncMock(
+        return_value={"id": "bc_new", "status": "CREATING", "target": {"url": "https://a"}}
+    )
+    await orchestrator.launch_task(100, 200, 1, "do work")
+    orchestrator.redis.set_last_agent_for_chat.assert_called_once_with(200, "bc_new")
+
+
+@pytest.mark.asyncio
 async def test_launch_task_success(orchestrator: Orchestrator, test_env: None) -> None:
     orchestrator.projects.get_by_id = AsyncMock(
         return_value=Project(id=1, name="n", repository_url="https://github.com/o/r", ref="main")
@@ -123,6 +144,7 @@ async def test_launch_task_success(orchestrator: Orchestrator, test_env: None) -
     orchestrator.jobs.get_by_id = AsyncMock(
         return_value=_job(id=5, cursor_agent_id="bc_new", status=AgentJobStatus.CREATING, agent_url="https://a")
     )
+    orchestrator.redis.set_last_agent_for_chat = AsyncMock()
     orchestrator.cursor.launch_agent = AsyncMock(
         return_value={"id": "bc_new", "status": "CREATING", "target": {"url": "https://a"}}
     )
@@ -234,6 +256,39 @@ async def test_launch_task_cursor_failed(orchestrator: Orchestrator) -> None:
 
 def test_check_telegram_allowed(test_env: None) -> None:
     check_telegram_allowed(1001)
+
+
+@pytest.mark.asyncio
+async def test_followup_uses_redis(orchestrator: Orchestrator) -> None:
+    orchestrator.redis.get_last_agent_for_chat = AsyncMock(return_value="bc_x")
+    orchestrator.cursor.add_followup = AsyncMock(return_value={"id": "bc_x"})
+    aid = await orchestrator.followup_agent(1, 2, "more")
+    assert aid == "bc_x"
+    orchestrator.cursor.add_followup.assert_called_once_with("bc_x", "more")
+
+
+@pytest.mark.asyncio
+async def test_stop_agent_job(orchestrator: Orchestrator) -> None:
+    j = _job(
+        id=3,
+        cursor_agent_id="bc_z",
+        status=AgentJobStatus.RUNNING,
+        telegram_chat_id=200,
+        telegram_user_id=100,
+    )
+    orchestrator.cursor.stop_agent = AsyncMock()
+    orchestrator.jobs.update_status_by_cursor_id = AsyncMock()
+    stopped = _job(
+        id=3,
+        cursor_agent_id="bc_z",
+        status=AgentJobStatus.STOPPED,
+        telegram_chat_id=200,
+        telegram_user_id=100,
+    )
+    orchestrator.jobs.get_by_id = AsyncMock(side_effect=[j, stopped])
+    out = await orchestrator.stop_agent_job(100, 200, 3)
+    assert out.status == AgentJobStatus.STOPPED
+    orchestrator.cursor.stop_agent.assert_called_once_with("bc_z")
 
 
 def test_check_telegram_allowed_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:

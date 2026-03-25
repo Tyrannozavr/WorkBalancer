@@ -33,6 +33,13 @@ def _orch(session, cursor: CursorCloudClient, redis: RedisService) -> Orchestrat
     )
 
 
+def _truncate(text: str, max_len: int = 3500) -> str:
+    t = text.strip()
+    if len(t) <= max_len:
+        return t
+    return t[: max_len - 1] + "…"
+
+
 def _deny_reason(exc: Exception) -> str:
     if isinstance(exc, ForbiddenError):
         return str(exc)
@@ -63,6 +70,9 @@ def build_router(settings: Settings, cursor: CursorCloudClient, redis: RedisServ
             "/add <repo_url> <ref> [имя] — добавить проект\n"
             "/use <id> — активный проект для чата\n"
             "/task <текст> — запустить агента Cursor\n"
+            "/followup или /fu <текст> — уточнение к последнему агенту\n"
+            "/stop [job_id] — остановить агента (без id — последний активный)\n"
+            "/status — последние задачи в этом чате\n"
             "/repos — репозитории Cursor (кэш)\n"
             "/cancel — отменить подтверждение задачи"
         )
@@ -169,7 +179,7 @@ def build_router(settings: Settings, cursor: CursorCloudClient, redis: RedisServ
             except Exception as e:
                 await session.rollback()
                 logger.exception("launch_task failed")
-                await message.answer(f"Ошибка Cursor API: {e}")
+                await message.answer(_truncate(f"Ошибка Cursor API: {e}", 500))
                 return
             await session.commit()
         lines = [
@@ -253,6 +263,94 @@ def build_router(settings: Settings, cursor: CursorCloudClient, redis: RedisServ
             return
         await redis.clear_pending_task(message.chat.id)
         await message.answer("Ожидающая задача сброшена.")
+
+    @router.message(Command("followup"))
+    @router.message(Command("fu"))
+    async def cmd_followup(message: Message) -> None:
+        if not message.from_user:
+            return
+        try:
+            check_telegram_allowed(message.from_user.id)
+        except ForbiddenError as e:
+            await message.answer(_deny_reason(e))
+            return
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            await message.answer("Использование: /followup <текст> (или /fu <текст>)")
+            return
+        prompt = parts[1].strip()
+        async with SessionLocal() as session:
+            orch = _orch(session, cursor, redis)
+            try:
+                agent_id = await orch.followup_agent(message.from_user.id, message.chat.id, prompt)
+            except (NotFoundError, ForbiddenError) as e:
+                await session.rollback()
+                await message.answer(_deny_reason(e))
+                return
+            except Exception as e:
+                await session.rollback()
+                logger.exception("followup failed")
+                await message.answer(_truncate(f"Ошибка Cursor API: {e}", 500))
+                return
+        await message.answer(_truncate(f"Follow-up отправлен агенту {agent_id}"))
+
+    @router.message(Command("stop"))
+    async def cmd_stop(message: Message) -> None:
+        if not message.from_user:
+            return
+        try:
+            check_telegram_allowed(message.from_user.id)
+        except ForbiddenError as e:
+            await message.answer(_deny_reason(e))
+            return
+        parts = (message.text or "").split()
+        job_id: int | None = None
+        if len(parts) >= 2:
+            try:
+                job_id = int(parts[1])
+            except ValueError:
+                await message.answer("job_id должен быть числом или опустите аргумент")
+                return
+        async with SessionLocal() as session:
+            orch = _orch(session, cursor, redis)
+            try:
+                job = await orch.stop_agent_job(message.from_user.id, message.chat.id, job_id)
+            except (NotFoundError, ForbiddenError) as e:
+                await session.rollback()
+                await message.answer(_deny_reason(e))
+                return
+            except Exception as e:
+                await session.rollback()
+                logger.exception("stop failed")
+                await message.answer(_truncate(f"Ошибка Cursor API: {e}", 500))
+                return
+        await message.answer(
+            _truncate(f"Остановка запрошена. Job #{job.id}, статус: {job.status.value}, агент: {job.cursor_agent_id}")
+        )
+
+    @router.message(Command("status"))
+    async def cmd_status(message: Message) -> None:
+        if not message.from_user:
+            return
+        try:
+            check_telegram_allowed(message.from_user.id)
+        except ForbiddenError as e:
+            await message.answer(_deny_reason(e))
+            return
+        async with SessionLocal() as session:
+            orch = _orch(session, cursor, redis)
+            jobs = await orch.list_jobs_for_chat(message.chat.id, message.from_user.id, limit=15)
+            await session.commit()
+        if not jobs:
+            await message.answer("Задач в этом чате пока нет.")
+            return
+        lines: list[str] = []
+        for j in jobs:
+            line = f"#{j.id} {j.status.value} — {j.prompt_preview[:120]}"
+            if j.cursor_agent_id:
+                line += f" [{j.cursor_agent_id}]"
+            lines.append(line)
+        await message.answer(_truncate("\n".join(lines)))
 
     @router.message(Command("repos"))
     async def cmd_repos(message: Message) -> None:

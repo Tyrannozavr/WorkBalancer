@@ -63,6 +63,19 @@ async def test_repos_cache(redis_svc: RedisService, monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_ping(redis_svc: RedisService, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = AsyncMock()
+    fake.ping = AsyncMock()
+    monkeypatch.setattr(
+        "workbalancer.infrastructure.redis_client.redis.from_url",
+        lambda *a, **k: fake,
+    )
+    redis_svc._r = None
+    await redis_svc.ping()
+    fake.ping.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_notify_terminal_once(redis_svc: RedisService, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = AsyncMock()
     fake.set = AsyncMock(return_value=True)

@@ -15,7 +15,7 @@ from workbalancer.application.ports import (
 )
 from workbalancer.config import get_settings
 from workbalancer.domain.errors import ConflictError, ForbiddenError, LimitExceededError, NotFoundError
-from workbalancer.domain.models import AgentJob, AgentWebhookPayload, Project
+from workbalancer.domain.models import AgentJob, AgentJobStatus, AgentWebhookPayload, Project
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,8 @@ class Orchestrator:
         agent_url = target.get("url")
 
         await self.jobs.update_from_launch(job.id, agent_id, status, agent_url)
+        if agent_id:
+            await self.redis.set_last_agent_for_chat(chat_id, agent_id)
         await self.audit.log(
             telegram_user_id,
             "launch_agent",
@@ -200,6 +202,99 @@ class Orchestrator:
         repos = await self.cursor.list_repositories()
         await self.redis.set_cached_repositories(repos, ttl_seconds=3600)
         return repos
+
+    async def _resolve_cursor_agent_for_chat(self, chat_id: int) -> str | None:
+        aid = await self.redis.get_last_agent_for_chat(chat_id)
+        if aid:
+            return aid
+        active = await self.jobs.list_active_for_chat(chat_id)
+        for j in active:
+            if j.cursor_agent_id:
+                return j.cursor_agent_id
+        recent = await self.jobs.list_recent_for_chat(chat_id, 10)
+        for j in recent:
+            if j.cursor_agent_id:
+                return j.cursor_agent_id
+        return None
+
+    async def followup_agent(self, telegram_user_id: int, chat_id: int, prompt: str) -> str:
+        agent_id = await self._resolve_cursor_agent_for_chat(chat_id)
+        if not agent_id:
+            raise NotFoundError("Нет агента для follow-up (сначала /task или укажите job через /status).")
+        preview = _preview(prompt)
+        try:
+            await self.cursor.add_followup(agent_id, prompt)
+        except Exception as e:
+            logger.exception("followup failed")
+            await self.audit.log(
+                telegram_user_id,
+                "followup_failed",
+                {"cursor_agent_id": agent_id, "error": str(e), "preview": preview},
+            )
+            await self.session.commit()
+            raise
+        await self.audit.log(
+            telegram_user_id,
+            "followup",
+            {"cursor_agent_id": agent_id, "preview": preview},
+        )
+        await self.session.commit()
+        return agent_id
+
+    async def _get_job_for_stop(
+        self, telegram_user_id: int, chat_id: int, job_id: int | None
+    ) -> AgentJob:
+        if job_id is not None:
+            job = await self.jobs.get_by_id(job_id)
+            if job is None:
+                raise NotFoundError("Job не найден")
+            if job.telegram_chat_id != chat_id or job.telegram_user_id != telegram_user_id:
+                raise ForbiddenError("Нет доступа к этому job")
+            if not job.cursor_agent_id:
+                raise NotFoundError("У job нет cursor_agent_id")
+            return job
+        active = await self.jobs.list_active_for_chat(chat_id)
+        for j in active:
+            if j.telegram_user_id == telegram_user_id and j.cursor_agent_id:
+                return j
+        aid = await self._resolve_cursor_agent_for_chat(chat_id)
+        if not aid:
+            raise NotFoundError("Нет активного агента для остановки")
+        job = await self.jobs.get_by_cursor_id(aid)
+        if job is None:
+            raise NotFoundError("Запись job не найдена")
+        if job.telegram_user_id != telegram_user_id or job.telegram_chat_id != chat_id:
+            raise ForbiddenError("Нет доступа")
+        return job
+
+    async def stop_agent_job(self, telegram_user_id: int, chat_id: int, job_id: int | None) -> AgentJob:
+        job = await self._get_job_for_stop(telegram_user_id, chat_id, job_id)
+        assert job.cursor_agent_id
+        try:
+            await self.cursor.stop_agent(job.cursor_agent_id)
+        except Exception as e:
+            logger.exception("stop_agent failed")
+            await self.audit.log(
+                telegram_user_id,
+                "stop_failed",
+                {"job_id": job.id, "cursor_agent_id": job.cursor_agent_id, "error": str(e)},
+            )
+            await self.session.commit()
+            raise
+        await self.jobs.update_status_by_cursor_id(job.cursor_agent_id, AgentJobStatus.STOPPED.value)
+        await self.audit.log(
+            telegram_user_id,
+            "stop_agent",
+            {"job_id": job.id, "cursor_agent_id": job.cursor_agent_id},
+        )
+        await self.session.commit()
+        out = await self.jobs.get_by_id(job.id)
+        assert out is not None
+        return out
+
+    async def list_jobs_for_chat(self, chat_id: int, telegram_user_id: int, limit: int = 15) -> list[AgentJob]:
+        jobs = await self.jobs.list_recent_for_chat(chat_id, limit)
+        return [j for j in jobs if j.telegram_user_id == telegram_user_id]
 
 
 def check_telegram_allowed(user_id: int) -> None:
